@@ -1,40 +1,77 @@
 import bcrypt from 'bcryptjs';
-import { User } from '../server/models/index.js';
-import sequelize from '../server/config/database.js';
-import logger from '../server/config/logger.js';
+import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
+import logger from '../server/config/logger.js';
+import { sequelize } from '../server/config/database.js';
+import models from '../server/models/index.js';
 
 dotenv.config();
 
-async function seedDatabase() {
-  try {
-    await sequelize.sync({ force: true });
-    
-    const password = await bcrypt.hash(process.env.DEFAULT_PASSWORD || 'admin123', 10);
+class DatabaseSeeder {
+  constructor() {
+    this.models = models;
+    this.defaultPassword = process.env.DEFAULT_PASSWORD || 'admin123';
+  }
+
+  async seed() {
+    const transaction = await sequelize.transaction();
+
+    try {
+      // Create users
+      const users = await this.createUsers(transaction);
+      const adminUser = users.find(u => u.role === 'admin');
+
+      await transaction.commit();
+      logger.info('Database seeded successfully!');
+      process.exit(0);
+    } catch (error) {
+      await transaction.rollback();
+      logger.error('Error seeding database:', error);
+      process.exit(1);
+    }
+  }
+
+  async createUsers(transaction) {
+    const password = await bcrypt.hash(this.defaultPassword, 10);
     
     const users = [
-      { username: 'admin', email: 'admin@example.com', role: 'admin' },
-      { username: 'logistics', email: 'logistics@example.com', role: 'logistics' },
-      { username: 'challan', email: 'challan@example.com', role: 'challan' },
-      { username: 'installation', email: 'installation@example.com', role: 'installation' },
-      { username: 'invoice', email: 'invoice@example.com', role: 'invoice' }
+      { 
+        username: 'admin',
+        email: 'admin@example.com',
+        roles: ['admin'],
+        isActive: true
+      },
+      { 
+        username: 'logistics',
+        email: 'logistics@example.com',
+        roles: ['logistics_manager'],
+        isActive: true
+      },
+      {
+        username: 'installer',
+        email: 'installer@example.com',
+        roles: ['installer'],
+        isActive: true
+      }
     ];
 
-    for (const userData of users) {
-      await User.create({
-        ...userData,
-        password,
-        isActive: true
-      });
-      logger.info(`Created user: ${userData.username}`);
-    }
+    const createdUsers = await this.models.User.bulkCreate(
+      users.map(user => ({
+        ...user,
+        id: uuidv4(),
+        password
+      })),
+      { 
+        transaction,
+        returning: true
+      }
+    );
 
-    logger.info('Database seeded successfully!');
-    process.exit(0);
-  } catch (error) {
-    logger.error('Error seeding database:', error);
-    process.exit(1);
+    logger.info(`Created ${createdUsers.length} default users`);
+    return createdUsers;
   }
 }
 
-seedDatabase();
+// Run seeder
+const seeder = new DatabaseSeeder();
+seeder.seed();

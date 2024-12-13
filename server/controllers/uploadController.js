@@ -1,222 +1,276 @@
-import { Op } from 'sequelize'; // Add this import at the top of your file
+import { Op } from 'sequelize';
 import logger from '../config/logger.js';
-import { ChallanReceipt, Consignee, InstallationReport, Invoice, LogisticsDetails, sequelize } from '../models/index.js';
-import { containers, deleteAzureFile, uploadFile } from '../utils/azureStorage.js';
+import { 
+  ChallanReceipt, 
+  Consignee, 
+  InstallationReport, 
+  Invoice, 
+  LogisticsDetails, 
+  sequelize 
+} from '../models/index.js';
+import { logActivity } from '../services/auditService.js';
+import azureStorage, { containers } from '../utils/azureStorage.js';
 import { updateTenderStatus } from '../utils/tenderStatus.js';
 
-export const uploadLogistics = async (req, res) => {
-  try {
-    const { consigneeId, date, courierName, docketNumber } = req.body;
-
-    const consignee = await Consignee.findByPk(consigneeId);
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
-    }
-
-    const fileUrls = [];
-    if (req.files?.length) {
-      for (const file of req.files) {
-        const fileUrl = await uploadFile(file, containers.LOGISTICS);
-        fileUrls.push(fileUrl);
-      }
-    }
-
-    const logistics = await LogisticsDetails.create({
-      consigneeId,
-      date: new Date(date),
-      courierName,
-      docketNumber,
-      documents: fileUrls,
-      createdBy: req.user.id
-    });
-
-    await consignee.update({ consignmentStatus: 'Dispatched' });
-    await updateTenderStatus(consignee.tenderId);
-
-    res.status(201).json(logistics);
-  } catch (error) {
-    logger.error('Error uploading logistics details:', error);
-    res.status(400).json({ error: error.message });
-  }
-};
-
-export const uploadChallan = async (req, res) => {
-  try {
-    const { consigneeId, date } = req.body;
-
-    const consignee = await Consignee.findByPk(consigneeId);
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'File is required' });
-    }
-
-    const fileUrl = await uploadFile(req.file, containers.CHALLAN);
-
-    const challan = await ChallanReceipt.create({
-      consigneeId,
-      date: new Date(date),
-      filePath: fileUrl,
-      createdBy: req.user.id
-    });
-
-    await consignee.update({ consignmentStatus: 'Installation Pending' });
-    await updateTenderStatus(consignee.tenderId);
-
-    res.status(201).json(challan);
-  } catch (error) {
-    logger.error('Error uploading challan receipt:', error);
-    res.status(400).json({ error: error.message });
-  }
-};
-
-export const uploadInstallation = async (req, res) => {
-  try {
-    const { consigneeId, date } = req.body;
-
-    const consignee = await Consignee.findByPk(consigneeId);
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'File is required' });
-    }
-
-    const fileUrl = await uploadFile(req.file, containers.INSTALLATION);
-
-    const installation = await InstallationReport.create({
-      consigneeId,
-      date: new Date(date),
-      filePath: fileUrl,
-      createdBy: req.user.id
-    });
-
-    await consignee.update({ consignmentStatus: 'Installation Done' });
-    await updateTenderStatus(consignee.tenderId);
-
-    res.status(201).json(installation);
-  } catch (error) {
-    logger.error('Error uploading installation report:', error);
-    res.status(400).json({ error: error.message });
-  }
-};
-
-export const uploadInvoice = async (req, res) => {
-  try {
-    const { consigneeId, date } = req.body;
-
-    const consignee = await Consignee.findByPk(consigneeId);
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'File is required' });
-    }
-
-    const fileUrl = await uploadFile(req.file, containers.INVOICE);
-
-    const invoice = await Invoice.create({
-      consigneeId,
-      date: new Date(date),
-      filePath: fileUrl,
-      createdBy: req.user.id
-    });
-
-    await consignee.update({ consignmentStatus: 'Invoice Done' });
-    await updateTenderStatus(consignee.tenderId);
-
-    res.status(201).json(invoice);
-  } catch (error) {
-    logger.error('Error uploading invoice:', error);
-    res.status(400).json({ error: error.message });
-  }
-};
-
-export const deleteFile = async (req, res) => {
-  try {
-    const { type } = req.params;
-    const { url } = req.body;
-
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
-    }
-
-    let containerName;
-    let model;
-    let updateField;
-
-    switch (type) {
-      case 'logistics':
-        containerName = containers.LOGISTICS;
-        model = LogisticsDetails;
-        updateField = 'documents';
-        break;
-      case 'challan':
-        containerName = containers.CHALLAN;
-        model = ChallanReceipt;
-        updateField = 'filePath';
-        break;
-      case 'installation':
-        containerName = containers.INSTALLATION;
-        model = InstallationReport;
-        updateField = 'filePath';
-        break;
-      case 'invoice':
-        containerName = containers.INVOICE;
-        model = Invoice;
-        updateField = 'filePath';
-        break;
-      default:
-        return res.status(400).json({ error: 'Invalid file type' });
-    }
+class UploadController {
+  async uploadLogistics(req, res, next) {
+    const transaction = await sequelize.transaction();
 
     try {
-      // Delete the file from Azure
-      await deleteAzureFile(url);
+      const { consigneeId, date, courierName, docketNumber } = req.body;
 
-      // Update the database only if the file path is valid
-      if (updateField === 'documents') {
-        // Remove the document URL from the array (in case of logistics or multiple documents)
+      const consignee = await Consignee.findByPk(consigneeId);
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      const fileUrls = [];
+      if (req.files?.length) {
+        for (const file of req.files) {
+          const uploadResult = await azureStorage.uploadFile(file, containers.LOGISTICS);
+          fileUrls.push(uploadResult.url);
+        }
+      }
+
+      const logistics = await LogisticsDetails.create({
+        consigneeId,
+        date: new Date(date),
+        courierName,
+        docketNumber,
+        documents: fileUrls,
+        createdBy: req.user.id
+      }, { transaction });
+
+      await logActivity(
+        req.user.id,
+        'UPLOAD_LOGISTICS',
+        'LogisticsDetails',
+        logistics.id,
+        {},
+        logistics.toJSON(),
+        transaction
+      );
+
+      await updateTenderStatus(consignee.tenderId, transaction);
+      await transaction.commit();
+
+      res.status(201).json(logistics);
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
+    }
+  }
+
+  async uploadChallan(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { consigneeId, date } = req.body;
+
+      const consignee = await Consignee.findByPk(consigneeId);
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      let fileUrl = null;
+      if (req.file) {
+        const uploadResult = await azureStorage.uploadFile(req.file, containers.CHALLAN);
+        fileUrl = uploadResult.url;
+      }
+
+      const challan = await ChallanReceipt.create({
+        consigneeId,
+        date: new Date(date),
+        filePath: fileUrl,
+        createdBy: req.user.id
+      }, { transaction });
+
+      await logActivity(
+        req.user.id,
+        'UPLOAD_CHALLAN',
+        'ChallanReceipt',
+        challan.id,
+        {},
+        challan.toJSON(),
+        transaction
+      );
+
+      await updateTenderStatus(consignee.tenderId, transaction);
+      await transaction.commit();
+
+      res.status(201).json(challan);
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
+    }
+  }
+
+  async uploadInstallation(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { consigneeId, date } = req.body;
+
+      const consignee = await Consignee.findByPk(consigneeId);
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      let fileUrl = null;
+      if (req.file) {
+        const uploadResult = await azureStorage.uploadFile(req.file, containers.INSTALLATION);
+        fileUrl = uploadResult.url;
+      }
+
+      const installation = await InstallationReport.create({
+        consigneeId,
+        date: new Date(date),
+        filePath: fileUrl,
+        createdBy: req.user.id
+      }, { transaction });
+
+      await logActivity(
+        req.user.id,
+        'UPLOAD_INSTALLATION',
+        'InstallationReport',
+        installation.id,
+        {},
+        installation.toJSON(),
+        transaction
+      );
+
+      await updateTenderStatus(consignee.tenderId, transaction);
+      await transaction.commit();
+
+      res.status(201).json(installation);
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
+    }
+  }
+
+  async uploadInvoice(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { consigneeId, date, amount } = req.body;
+
+      const consignee = await Consignee.findByPk(consigneeId);
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      let fileUrl = null;
+      if (req.file) {
+        const uploadResult = await azureStorage.uploadFile(req.file, containers.INVOICE);
+        fileUrl = uploadResult.url;
+      }
+
+      const invoice = await Invoice.create({
+        consigneeId,
+        date: new Date(date),
+        amount: parseFloat(amount),
+        filePath: fileUrl,
+        createdBy: req.user.id
+      }, { transaction });
+
+      await logActivity(
+        req.user.id,
+        'UPLOAD_INVOICE',
+        'Invoice',
+        invoice.id,
+        {},
+        invoice.toJSON(),
+        transaction
+      );
+
+      await updateTenderStatus(consignee.tenderId, transaction);
+      await transaction.commit();
+
+      res.status(201).json(invoice);
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
+    }
+  }
+
+  async deleteFile(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { url, type } = req.query;
+      if (!url || !type) {
+        return next(new Error('URL and type are required'));
+      }
+
+      // Determine container and model based on type
+      let container, model, field;
+      switch (type.toLowerCase()) {
+        case 'logistics':
+          container = containers.LOGISTICS;
+          model = LogisticsDetails;
+          field = 'documents';
+          break;
+        case 'challan':
+          container = containers.CHALLAN;
+          model = ChallanReceipt;
+          field = 'filePath';
+          break;
+        case 'installation':
+          container = containers.INSTALLATION;
+          model = InstallationReport;
+          field = 'filePath';
+          break;
+        case 'invoice':
+          container = containers.INVOICE;
+          model = Invoice;
+          field = 'filePath';
+          break;
+        default:
+          return next(new Error('Invalid file type'));
+      }
+
+      // Delete from Azure storage
+      await azureStorage.deleteFile(url);
+
+      // Update database
+      if (field === 'documents') {
         await model.update(
-          { documents: sequelize.fn('array_remove', sequelize.col('documents'), url) },
-          { where: { documents: { [Op.contains]: [url] } } }
+          { 
+            documents: sequelize.fn('array_remove', sequelize.col('documents'), url)
+          },
+          { 
+            where: { documents: { [Op.contains]: [url] } },
+            transaction 
+          }
         );
       } else {
-        // For filePath, ensure we're setting it to null only if that's the intended behavior
         await model.update(
-          { [updateField]: null },
-          { where: { [updateField]: url } }
+          { [field]: null },
+          { 
+            where: { [field]: url },
+            transaction 
+          }
         );
       }
 
+      await logActivity(
+        req.user.id,
+        'DELETE_FILE',
+        type.toUpperCase(),
+        null,
+        { url },
+        {},
+        transaction
+      );
+
+      await transaction.commit();
       res.json({ message: 'File deleted successfully' });
     } catch (error) {
-      if (error.message === 'File not found') {
-        // Handle the case where the file doesn't exist in Azure storage
-        if (updateField === 'documents') {
-          await model.update(
-            { documents: sequelize.fn('array_remove', sequelize.col('documents'), url) },
-            { where: { documents: { [Op.contains]: [url] } } }
-          );
-        } else {
-          // Remove the filePath record if it doesn't exist in Azure, but handle gracefully
-          await model.update(
-            { [updateField]: null },
-            { where: { [updateField]: url } }
-          );
-        }
-        res.json({ message: 'File record removed from database' });
-      } else {
-        // Re-throw the error if it's not a file not found issue
-        throw error;
-      }
+      await transaction.rollback();
+      next(error);
     }
-  } catch (error) {
-    logger.error('Error deleting file:', error);
-    res.status(500).json({ error: error.message });
   }
-};
+}
+
+export default new UploadController();

@@ -10,6 +10,7 @@ import { TenderDetails } from './pages/TenderDetails';
 import { TenderList } from './pages/TenderList';
 import { Unauthorized } from './pages/unauthorized';
 import { UserRoleAccess } from './pages/UserRoleAccess';
+import { AccessoryConsumableManagement } from './pages/AccessoryConsumableManagement';
 
 function App() {
   return (
@@ -26,6 +27,17 @@ function App() {
                 <>
                   <Navigation />
                   <Navigate to="/tenders" replace />
+                </>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/manage-items"
+            element={
+              <PrivateRoute adminOnly requiredRoles={['admin', 'super_admin']}>
+                <>
+                  <Navigation />
+                  <AccessoryConsumableManagement />
                 </>
               </PrivateRoute>
             }
@@ -67,7 +79,7 @@ function App() {
           <Route
             path="/equipment-installation"
             element={
-              <PrivateRoute adminOnly requiredRoles={['admin', 'super_admin']}>  
+              <PrivateRoute adminOnly requiredRoles={['admin', 'super_admin']}>
                 <>
                   <Navigation />
                   <EquipmentInstallation />

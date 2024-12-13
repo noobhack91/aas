@@ -21,18 +21,29 @@ export const Navigation: React.FC = () => {
               <Link
                 to="/tenders"
                 className={`px-3 py-2 rounded-md text-sm font-medium ${location.pathname === '/tenders'
-                    ? 'text-blue-600'
-                    : 'text-gray-700 hover:text-blue-600'
+                  ? 'text-blue-600'
+                  : 'text-gray-700 hover:text-blue-600'
                   }`}
               >
                 Tenders
               </Link>
               {user?.roles.includes('super_admin') && (
                 <Link to="/admin/users" className={`px-3 py-2 rounded-md text-sm font-medium ${location.pathname === '/admin/users'
-                    ? 'text-blue-600'
-                    : 'text-gray-700 hover:text-blue-600'
+                  ? 'text-blue-600'
+                  : 'text-gray-700 hover:text-blue-600'
                   }`}>
                   Manage Users
+                </Link>
+              )}
+              {user?.roles.some(role => ['admin', 'super_admin'].includes(role)) && (
+                <Link
+                  to="/manage-items"
+                  className={`px-3 py-2 rounded-md text-sm font-medium ${location.pathname === '/manage-items'
+                      ? 'text-blue-600'
+                      : 'text-gray-700 hover:text-blue-600'
+                    }`}
+                >
+                  Manage Items
                 </Link>
               )}
 
@@ -40,8 +51,8 @@ export const Navigation: React.FC = () => {
                 <Link
                   to="/equipment-installation"
                   className={`px-3 py-2 rounded-md text-sm font-medium ${location.pathname === '/equipment-installation'
-                      ? 'text-blue-600'
-                      : 'text-gray-700 hover:text-blue-600'
+                    ? 'text-blue-600'
+                    : 'text-gray-700 hover:text-blue-600'
                     }`}
                 >
                   <div className="flex items-center">

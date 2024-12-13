@@ -10,7 +10,7 @@ import logger from './config/logger.js';
 import routes from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { sequelize } from './config/database.js';
-import { createContainers } from './utils/azureStorage.js';
+import { initializeStorage } from './utils/azureStorage.js';
 
 dotenv.config();
 
@@ -34,10 +34,15 @@ try {
   if (err.code !== 'EEXIST') throw err;
 }
 
-// Initialize Azure Storage containers
-createContainers().catch(err => {
-  logger.error('Failed to initialize Azure containers:', err);
-});
+// Initialize Azure Storage
+try {
+  await initializeStorage();
+  logger.info('Azure Storage initialized successfully');
+} catch (error) {
+  logger.error('Failed to initialize Azure Storage:', error);
+  // Decide if you want to exit the process or continue
+  // process.exit(1);
+}
 
 // Routes
 app.use('/api', routes);

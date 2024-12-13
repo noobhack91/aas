@@ -1,127 +1,185 @@
-import { BlobServiceClient } from '@azure/storage-blob';
+import { BlobServiceClient, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../config/logger.js';
 import dotenv from 'dotenv';
 
-// Load environment variables from .env file
 dotenv.config();
 
-// Ensure connection string is available
-const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-if (!connectionString) {
-  logger.error('Azure Storage connection string is not defined in environment variables.');
-  throw new Error('Azure Storage connection string is not defined');
-}
+class AzureStorageService {
+  constructor() {
+    this.validateConfig();
+    this.initializeClient();
+  }
 
-const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
+  validateConfig() {
+    const requiredEnvVars = [
+      'AZURE_STORAGE_ACCOUNT',
+      'AZURE_STORAGE_ACCESS_KEY',
+      'AZURE_CONTAINER_LOGISTICS',
+      'AZURE_CONTAINER_CHALLAN',
+      'AZURE_CONTAINER_INSTALLATION',
+      'AZURE_CONTAINER_INVOICE'
+    ];
 
-// Define container names in an object for easy management
-export const containers = {
-  LOGISTICS: process.env.AZURE_CONTAINER_LOGISTICS,
-  CHALLAN: process.env.AZURE_CONTAINER_CHALLAN,
-  INSTALLATION: process.env.AZURE_CONTAINER_INSTALLATION,
-  INVOICE: process.env.AZURE_CONTAINER_INVOICE
-};
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    if (missingVars.length) {
+      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+    }
+  }
 
-// Helper function to check if the container exists and create if not
-async function ensureContainerExists(containerName) {
-  const containerClient = blobServiceClient.getContainerClient(containerName);
-  const exists = await containerClient.exists();
-  
-  if (!exists) {
-    await containerClient.create({
-      access: 'blob' // Allow public read access to blobs only
-    });
-    logger.info(`Container ${containerName} created`);
+  initializeClient() {
+    const credential = new StorageSharedKeyCredential(
+      process.env.AZURE_STORAGE_ACCOUNT,
+      process.env.AZURE_STORAGE_ACCESS_KEY
+    );
+
+    this.blobServiceClient = new BlobServiceClient(
+      `https://${process.env.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net`,
+      credential
+    );
+
+    this.containers = {
+      LOGISTICS: process.env.AZURE_CONTAINER_LOGISTICS,
+      CHALLAN: process.env.AZURE_CONTAINER_CHALLAN,
+      INSTALLATION: process.env.AZURE_CONTAINER_INSTALLATION,
+      INVOICE: process.env.AZURE_CONTAINER_INVOICE
+    };
+  }
+
+  async initializeContainers() {
+    try {
+      const initPromises = Object.values(this.containers).map(containerName =>
+        this.ensureContainerExists(containerName)
+      );
+      await Promise.all(initPromises);
+      logger.info('Azure storage containers initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize Azure storage containers:', error);
+      throw error;
+    }
+  }
+
+  async ensureContainerExists(containerName) {
+    const containerClient = this.blobServiceClient.getContainerClient(containerName);
+    const exists = await containerClient.exists();
+    
+    if (!exists) {
+      await containerClient.create({
+        access: 'blob',
+        metadata: { createdDate: new Date().toISOString() }
+      });
+      logger.info(`Created container: ${containerName}`);
+    }
+  }
+
+  async uploadFile(file, containerName) {
+    if (!file?.buffer) {
+      throw new Error('Invalid file data');
+    }
+
+    if (!this.containers[containerName]) {
+      throw new Error(`Invalid container name: ${containerName}`);
+    }
+
+    try {
+      const containerClient = this.blobServiceClient.getContainerClient(
+        this.containers[containerName]
+      );
+      
+      const blobName = this.generateBlobName(file);
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      
+      const contentType = file.mimetype || 'application/octet-stream';
+      const options = {
+        blobHTTPHeaders: {
+          blobContentType: contentType,
+          blobContentDisposition: `inline; filename="${file.originalname}"`
+        },
+        metadata: {
+          originalName: file.originalname,
+          uploadDate: new Date().toISOString()
+        }
+      };
+
+      await blockBlobClient.uploadData(file.buffer, options);
+      logger.info(`File uploaded successfully: ${containerName}/${blobName}`);
+      
+      return {
+        url: blockBlobClient.url,
+        name: blobName,
+        contentType,
+        size: file.size
+      };
+    } catch (error) {
+      logger.error('Error uploading file to Azure:', error);
+      throw new Error('Failed to upload file to Azure Storage');
+    }
+  }
+
+  async deleteFile(url) {
+    try {
+      const { containerName, blobName } = this.parseBlobUrl(url);
+      const containerClient = this.blobServiceClient.getContainerClient(containerName);
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+      const exists = await blockBlobClient.exists();
+      if (!exists) {
+        throw new Error(`File not found: ${containerName}/${blobName}`);
+      }
+
+      await blockBlobClient.delete();
+      logger.info(`File deleted successfully: ${containerName}/${blobName}`);
+      
+      return true;
+    } catch (error) {
+      logger.error('Error deleting file from Azure:', error);
+      throw error;
+    }
+  }
+
+  parseBlobUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+      
+      if (pathSegments.length < 2) {
+        throw new Error('Invalid blob URL format');
+      }
+
+      const containerName = pathSegments[0];
+      const blobName = pathSegments.slice(1).join('/');
+
+      if (!Object.values(this.containers).includes(containerName)) {
+        throw new Error(`Invalid container name: ${containerName}`);
+      }
+
+      return { containerName, blobName };
+    } catch (error) {
+      throw new Error(`Invalid blob URL: ${error.message}`);
+    }
+  }
+
+  generateBlobName(file) {
+    const timestamp = Date.now();
+    const uuid = uuidv4();
+    const extension = file.originalname.split('.').pop();
+    return `${timestamp}-${uuid}.${extension}`;
   }
 }
 
-// Create necessary containers if they do not exist
-export async function createContainers() {
+// Create singleton instance
+const azureStorage = new AzureStorageService();
+
+// Export initialization method
+export const initializeStorage = async () => {
   try {
-    for (const containerName of Object.values(containers)) {
-      await ensureContainerExists(containerName);
-    }
+    await azureStorage.initializeContainers();
+    logger.info('Azure Storage initialized successfully');
   } catch (error) {
-    logger.error('Error initializing Azure containers:', error);
+    logger.error('Failed to initialize Azure Storage:', error);
     throw error;
   }
-}
+};
 
-// Upload file to Azure Blob Storage
-export async function uploadFile(file, containerName) {
-  // Validate the file and container name
-  if (!file?.buffer) {
-    throw new Error('Invalid file data');
-  }
-
-  if (!Object.values(containers).includes(containerName)) {
-    throw new Error('Invalid container name');
-  }
-
-  try {
-    const containerClient = blobServiceClient.getContainerClient(containerName);
-    const blobName = `${uuidv4()}-${file.originalname}`;
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-
-    // Upload file to the blob storage
-    await blockBlobClient.uploadData(file.buffer, {
-      blobHTTPHeaders: {
-        blobContentType: file.mimetype
-      }
-    });
-
-    logger.info(`File uploaded successfully to ${containerName}/${blobName}`);
-    return blockBlobClient.url;
-  } catch (error) {
-    logger.error('Error uploading file to Azure:', error);
-    throw new Error('Failed to upload file to Azure Storage');
-  }
-}
-
-// Delete a file from Azure Blob Storage using the file URL
-export async function deleteAzureFile(url) {
-  try {
-    const { containerName, blobName } = parseBlobUrl(url);
-
-    const containerClient = blobServiceClient.getContainerClient(containerName);
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-
-    // Check if the blob exists before attempting to delete
-    const exists = await blockBlobClient.exists();
-    if (!exists) {
-      logger.warn(`File not found: ${containerName}/${blobName}`);
-      throw new Error(`File not found: ${containerName}/${blobName}`);
-    }
-
-    // Proceed to delete the file
-    await blockBlobClient.delete();
-    logger.info(`File deleted successfully: ${containerName}/${blobName}`);
-  } catch (error) {
-    logger.error('Error deleting file from Azure:', error);
-    // Rethrow specific error messages for better context
-    if (error.message.includes('File not found')) {
-      throw new Error(error.message);
-    }
-    throw new Error(`Failed to delete file from Azure Storage. Error: ${error.message}`);
-  }
-}
-
-// Helper function to parse the blob URL and extract container and blob name
-function parseBlobUrl(url) {
-  const urlObj = new URL(url);
-  const pathSegments = urlObj.pathname.split('/').filter(Boolean);
-  
-  if (pathSegments.length < 2) {
-    throw new Error('Invalid file URL format: Expected container and blob name');
-  }
-
-  const containerName = pathSegments[0];
-  const blobName = pathSegments.slice(1).join('/'); // In case the blob name contains subdirectories
-
-  if (!Object.values(containers).includes(containerName)) {
-    throw new Error(`Invalid container name: ${containerName}`);
-  }
-
-  return { containerName, blobName };
-}
+export default azureStorage;
+export const containers = azureStorage.containers;

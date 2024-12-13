@@ -1,10 +1,10 @@
 // src/types/index.ts  
-export interface User {  
-  id: string;  
-  username: string;  
-  email: string;  
-  roles: Array<'admin' | 'super_admin' | 'logistics' | 'challan' | 'installation' | 'invoice'>;  
-}  
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  roles: Array<'admin' | 'super_admin' | 'logistics' | 'challan' | 'installation' | 'invoice'>;
+}
 
 export interface TenderDetails {
   id: string;
@@ -39,10 +39,26 @@ export interface ConsigneeDetails {
   serialNumber?: string;
 }
 
-export type ConsignmentStatus = 
+export type ConsignmentStatus =
   | 'Processing'
   | 'Dispatched'
   | 'Installation Pending'
   | 'Installation Done'
   | 'Invoice Done'
   | 'Bill Submitted';
+
+export interface Accessory {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Consumable {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}  

@@ -21,10 +21,10 @@ interface TenderListFilters {
 }
 
 const statusOptions = [
-  { value: 'Pending', label: 'Pending' },
+  { value: 'Draft', label: 'Draft' },
+  { value: 'In Progress', label: 'In Progress' },
   { value: 'Partially Completed', label: 'Partially Completed' },
-  { value: 'Completed', label: 'Completed' },
-  { value: 'Draft', label: 'Draft' }
+  { value: 'Completed', label: 'Completed' }
 ];
 
 const yesNoOptions = [
@@ -55,6 +55,20 @@ export const TenderList: React.FC = () => {
       </ul>
     </div>
   );
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Completed':
+        return 'bg-green-100 text-green-800';
+      case 'Partially Completed':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'In Progress':
+        return 'bg-blue-100 text-blue-800';
+      case 'Draft':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   const [tenders, setTenders] = useState([]);
   const [districts, setDistricts] = useState([]);
@@ -173,14 +187,16 @@ export const TenderList: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <Select
-                value={statusOptions.find(s => s.value === filters.status)}
-                onChange={(option) => setFilters({ ...filters, status: option?.value || null })}
-                options={statusOptions}
-                isClearable
-                placeholder="Select status"
-              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <Select
+                  value={statusOptions.find(s => s.value === filters.status)}
+                  onChange={(option) => setFilters({ ...filters, status: option?.value || null })}
+                  options={statusOptions}
+                  isClearable
+                  placeholder="Select status"
+                />
+              </div>
             </div>
 
             <div>
@@ -266,14 +282,7 @@ export const TenderList: React.FC = () => {
                       {format(new Date(tender.poDate), 'dd/MM/yyyy')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${tender.status === 'Completed' ? 'bg-green-100 text-green-800' :
-                          tender.status === 'Partially Completed' ? 'bg-yellow-100 text-yellow-800' :
-                            tender.status === 'In Progress' ? 'bg-blue-100 text-blue-800' :
-                              tender.status === 'Closed' ? 'bg-red-100 text-red-800' :
-                                tender.status === 'Draft' ? 'bg-gray-100 text-gray-600' :
-                                  tender.status === 'Submitted' ? 'bg-purple-100 text-purple-800' :
-                                    'bg-gray-100 text-gray-800'
-                        }`}>
+                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(tender.status)}`}>
                         {tender.status}
                       </span>
                     </td>

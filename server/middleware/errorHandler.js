@@ -1,35 +1,53 @@
+import { ValidationError, UniqueConstraintError } from 'sequelize';
 import logger from '../config/logger.js';
 
 export const errorHandler = (err, req, res, next) => {
+  // Log error with request context
   logger.error({
-    message: err.message,
-    stack: err.stack,
+    error: err,
+    user: req.user?.id,
     path: req.path,
-    method: req.method
+    method: req.method,
+    body: req.body
   });
 
-  if (err.name === 'SequelizeValidationError') {
+  // Handle specific error types
+  if (err instanceof ValidationError) {
     return res.status(400).json({
-      error: 'Validation error',
-      details: err.errors.map(e => ({
+      status: 'error',
+      message: 'Validation error',
+      errors: err.errors.map(e => ({
         field: e.path,
         message: e.message
       }))
     });
   }
 
-  if (err.name === 'SequelizeUniqueConstraintError') {
+  if (err instanceof UniqueConstraintError) {
     return res.status(409).json({
-      error: 'Resource already exists',
-      details: err.errors.map(e => ({
+      status: 'error',
+      message: 'Resource already exists',
+      errors: err.errors.map(e => ({
         field: e.path,
         message: e.message
       }))
     });
   }
 
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  // Add more specific error handlers
+  const errorTypes = {
+    UnauthorizedError: 401,
+    ForbiddenError: 403,
+    NotFoundError: 404
+  };
+
+  const statusCode = errorTypes[err.name] || 500;
+
+  res.status(statusCode).json({
+    status: 'error',
+    message: process.env.NODE_ENV === 'production' 
+      ? statusCode === 500 ? 'Internal server error' : err.message
+      : err.message,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
   });
-};
+};  

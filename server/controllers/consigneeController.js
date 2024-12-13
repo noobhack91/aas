@@ -1,156 +1,227 @@
+import { Op } from 'sequelize';
 import logger from '../config/logger.js';
-import { ChallanReceipt, Consignee, InstallationReport, Invoice, LogisticsDetails } from '../models/index.js';
+import { 
+  ChallanReceipt, 
+  Consignee, 
+  InstallationReport, 
+  Invoice, 
+  LogisticsDetails,
+  PurchaseOrder,
+  sequelize 
+} from '../models/index.js';
+import { logActivity } from '../services/auditService.js';
 import { updateTenderStatus } from '../utils/tenderStatus.js';
 
-export const createConsignee = async (req, res) => {
-  try {
-    const consignee = await Consignee.create(req.body);
-    res.status(201).json(consignee);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
+class ConsigneeController {
+  async getConsignees(req, res, next) {
+    try {
+      const { 
+        page = 1, 
+        limit = 20, 
+        districts, 
+        status,
+        search,
+        tenderId,
+        purchaseOrderId 
+      } = req.query;
 
-export const getConsignees = async (req, res) => {
-  try {
-    const { districts } = req.query;
-    const where = {};
+      const whereClause = {
+        ...(districts && { districtName: districts.split(',') }),
+        ...(status && { consignmentStatus: status }),
+        ...(tenderId && { tenderId }),
+        ...(purchaseOrderId && { purchaseOrderId }),
+        ...(search && {
+          [Op.or]: [
+            { districtName: { [Op.iLike]: `%${search}%` } },
+            { blockName: { [Op.iLike]: `%${search}%` } },
+            { facilityName: { [Op.iLike]: `%${search}%` } }
+          ]
+        })
+      };
 
-    if (districts) {
-      where.districtName = districts.split(',');
+      const { rows, count } = await Consignee.findAndCountAll({
+        where: whereClause,
+        include: [
+          { 
+            model: LogisticsDetails, 
+            as: 'logisticsDetails',
+            required: false 
+          },
+          { 
+            model: ChallanReceipt, 
+            as: 'challanReceipt',
+            required: false 
+          },
+          { 
+            model: InstallationReport, 
+            as: 'installationReport',
+            required: false 
+          },
+          { 
+            model: Invoice, 
+            as: 'invoice',
+            required: false 
+          },
+          {
+            model: PurchaseOrder,
+            attributes: ['poNumber', 'poDate']
+          }
+        ],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset: (page - 1) * limit
+      });
+
+      res.json({
+        consignees: rows,
+        total: count,
+        totalPages: Math.ceil(count / limit),
+        currentPage: parseInt(page)
+      });
+    } catch (error) {
+      next(error);
     }
-
-    const consignees = await Consignee.findAll({
-      where,
-      include: [
-        { model: LogisticsDetails, as: 'logisticsDetails' },
-        { model: ChallanReceipt, as: 'challanReceipt' },
-        { model: InstallationReport, as: 'installationReport' },
-        { model: Invoice, as: 'invoice' }
-      ]
-    });
-
-    res.json(consignees);
-  } catch (error) {
-    logger.error('Error fetching consignees:', error);
-    res.status(500).json({ error: error.message });
   }
-};
 
-export const updateConsigneeStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const consignee = await Consignee.findByPk(id);
+  async getConsigneeDetails(req, res, next) {
+    try {
+      const { id } = req.params;
 
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
+      const consignee = await Consignee.findByPk(id, {
+        include: [
+          {
+            model: LogisticsDetails,
+            as: 'logisticsDetails',
+            attributes: ['date', 'courierName', 'docketNumber', 'documents']
+          },
+          {
+            model: ChallanReceipt,
+            as: 'challanReceipt',
+            attributes: ['date', 'filePath']
+          },
+          {
+            model: InstallationReport,
+            as: 'installationReport',
+            attributes: ['date', 'filePath']
+          },
+          {
+            model: Invoice,
+            as: 'invoice',
+            attributes: ['date', 'filePath']
+          },
+          {
+            model: PurchaseOrder,
+            attributes: ['poNumber', 'poDate', 'status']
+          }
+        ]
+      });
+
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      res.json(consignee);
+    } catch (error) {
+      next(error);
     }
-
-    await consignee.update(req.body);
-    logger.info(`Consignee ${id} status updated`);
-    res.json(consignee);
-  } catch (error) {
-    logger.error('Error updating consignee:', error);
-    res.status(500).json({ error: error.message });
   }
-};
-export const getConsigneeFiles = async (req, res) => {
-  try {
-    const { id, type } = req.params;
-    let files = [];
 
-    switch (type) {
-      case 'logistics':
-        const logistics = await LogisticsDetails.findOne({ where: { consigneeId: id } });
-        files = logistics?.documents || [];
-        break;
-      case 'challan':
-        const challan = await ChallanReceipt.findOne({ where: { consigneeId: id } });
-        files = challan?.filePath ? [challan.filePath] : [];
-        break;
-      case 'installation':
-        const installation = await InstallationReport.findOne({ where: { consigneeId: id } });
-        files = installation?.filePath ? [installation.filePath] : [];
-        break;
-      case 'invoice':
-        const invoice = await Invoice.findOne({ where: { consigneeId: id } });
-        files = invoice?.filePath ? [invoice.filePath] : [];
-        break;
-      default:
-        return res.status(400).json({ error: 'Invalid file type' });
+  async updateAccessoriesStatus(req, res, next) {
+    const transaction = await sequelize.transaction();
+    
+    try {
+      const { id } = req.params;
+      const { accessoryUpdates } = req.body;
+
+      const consignee = await Consignee.findByPk(id);
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      const oldAccessories = consignee.accessoriesPending;
+      const updatedItems = oldAccessories.items.filter(
+        item => !accessoryUpdates.includes(item)
+      );
+
+      const updatedAccessories = {
+        status: updatedItems.length > 0,
+        count: updatedItems.length,
+        items: updatedItems
+      };
+
+      await consignee.update(
+        { accessoriesPending: updatedAccessories },
+        { transaction }
+      );
+
+      await logActivity(
+        req.user.id,
+        'UPDATE_ACCESSORIES',
+        'Consignee',
+        id,
+        { accessoriesPending: oldAccessories },
+        { accessoriesPending: updatedAccessories },
+        transaction
+      );
+
+      await updateTenderStatus(consignee.tenderId, transaction);
+      await transaction.commit();
+
+      res.json({
+        message: 'Accessories status updated successfully',
+        consignee: await Consignee.findByPk(id)
+      });
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
     }
-
-    res.json({ files });
-  } catch (error) {
-    logger.error('Error fetching consignee files:', error);
-    res.status(500).json({ error: error.message });
   }
-};
-export const getConsigneeDetails = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const consignee = await Consignee.findByPk(id, {
-      include: [
-        {
-          model: LogisticsDetails,
-          as: 'logisticsDetails',
-          attributes: ['date', 'courierName', 'docketNumber', 'documents']
-        },
-        {
-          model: ChallanReceipt,
-          as: 'challanReceipt',
-          attributes: ['date', 'filePath']
-        },
-        {
-          model: InstallationReport,
-          as: 'installationReport',
-          attributes: ['date', 'filePath']
-        },
-        {
-          model: Invoice,
-          as: 'invoice',
-          attributes: ['date', 'filePath']
-        }
-      ]
-    });
 
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
+  async updateConsignmentStatus(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { id } = req.params;
+      const { status, remarks } = req.body;
+
+      const consignee = await Consignee.findByPk(id);
+      if (!consignee) {
+        return next(new Error('Consignee not found'));
+      }
+
+      const oldValues = {
+        status: consignee.consignmentStatus,
+        remarks: consignee.remarks
+      };
+
+      await consignee.update({
+        consignmentStatus: status,
+        remarks,
+        updatedBy: req.user.id
+      }, { transaction });
+
+      await logActivity(
+        req.user.id,
+        'UPDATE_CONSIGNMENT_STATUS',
+        'Consignee',
+        id,
+        oldValues,
+        { status, remarks },
+        transaction
+      );
+
+      await updateTenderStatus(consignee.tenderId, transaction);
+      await transaction.commit();
+
+      res.json({
+        message: 'Consignment status updated successfully',
+        consignee: await Consignee.findByPk(id)
+      });
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
     }
-
-    res.json(consignee);
-  } catch (error) {
-    logger.error('Error fetching consignee details:', error);
-    res.status(500).json({ error: error.message });
   }
-};
-export const updateAccessoriesStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { accessoryName, status } = req.body;
+}
 
-    const consignee = await Consignee.findByPk(id);
-    if (!consignee) {
-      return res.status(404).json({ error: 'Consignee not found' });
-    }
-
-    const currentAccessories = consignee.accessoriesPending;
-    const updatedItems = currentAccessories.items.filter(item => item !== accessoryName);
-
-    const updatedAccessories = {
-      status: updatedItems.length > 0,
-      count: updatedItems.length,
-      items: updatedItems
-    };
-
-    await consignee.update({ accessoriesPending: updatedAccessories });
-
-    // Update tender status if needed  
-    await updateTenderStatus(consignee.tenderId);
-
-    res.json({ message: 'Accessories status updated successfully', consignee });
-  } catch (error) {
-    logger.error('Error updating accessories status:', error);
-    res.status(500).json({ error: error.message });
-  }
-};  
+export default new ConsigneeController();  

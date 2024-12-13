@@ -1,77 +1,194 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { ValidationError } from 'sequelize';
 import logger from '../config/logger.js';
 import { User } from '../models/index.js';
+import { logActivity } from '../services/auditService.js';
 
-export const login = async (req, res) => {
-  try {
-    const { username, password } = req.body;
+class AuthController {
+  async login(req, res, next) {
+    try {
+      const { username, password } = req.body;
 
-    logger.info(`Login attempt for username: ${username}`);
+      const user = await User.findOne({ 
+        where: { username },
+        attributes: ['id', 'username', 'email', 'password', 'roles', 'isActive'] 
+      });
 
-    // Find the user by username  
-    const user = await User.findOne({ where: { username } });
-    if (!user || !user.isActive) {
-      logger.warn(`Failed login attempt for username: ${username} - User not found or inactive`);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      if (!user || !user.isActive) {
+        logger.warn(`Failed login attempt for username: ${username}`);
+        return next(new Error('Invalid credentials'));
+      }
+
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) {
+        logger.warn(`Invalid password for username: ${username}`);
+        return next(new Error('Invalid credentials'));
+      }
+
+      await user.update({ lastLogin: new Date() });
+      const token = user.generateAuthToken();
+
+      await logActivity(user.id, 'LOGIN', 'User', user.id);
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          roles: user.roles
+        }
+      });
+    } catch (error) {
+      next(error);
     }
+  }
 
-    // Compare the provided password with the hashed password in the database  
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      logger.warn(`Failed login attempt for username: ${username} - Password mismatch`);
-      return res.status(401).json({ error: 'Invalid credentials' });
+  async register(req, res, next) {
+    try {
+      const { username, email, password, roles } = req.body;
+
+      // Validate roles if provided
+      if (roles && !req.user?.hasRole('admin')) {
+        return next(new Error('Insufficient permissions to assign roles'));
+      }
+
+      const user = await User.create({
+        username,
+        email,
+        password,
+        roles: roles || ['user']
+      });
+
+      await logActivity(
+        req.user?.id || user.id,
+        'REGISTER',
+        'User',
+        user.id,
+        {},
+        { username, email, roles: user.roles }
+      );
+
+      res.status(201).json({
+        message: 'User registered successfully',
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          roles: user.roles
+        }
+      });
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return next(error);
+      }
+      next(new Error('Registration failed'));
     }
-
-    // Generate a JWT token  
-    const token = jwt.sign(
-      { id: user.id, roles: user.roles }, // Include roles in the token payload  
-      process.env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    logger.info(`Successful login for username: ${username}`);
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        roles: user.roles, // Ensure roles are included in the response  
-      },
-    });
-  } catch (error) {
-    logger.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
   }
-};
 
-export const register = async (req, res) => {
-  try {
-    const { username, email, password, roles } = req.body;
+  async forgotPassword(req, res, next) {
+    try {
+      const { email } = req.body;
+      const user = await User.findOne({ where: { email } });
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await User.create({
-      username,
-      email,
-      password: hashedPassword,
-      roles: roles || ['user'], // Default to 'user' role if no roles are provided  
-    });
+      if (!user) {
+        return next(new Error('No user found with this email'));
+      }
 
-    logger.info(`New user registered: ${username}`);
+      const resetToken = await user.generatePasswordResetToken();
 
-    res.status(201).json({
-      message: 'User registered successfully',
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        roles: user.roles,
-      },
-    });
-  } catch (error) {
-    logger.error('Registration error:', error);
-    res.status(400).json({ error: error.message });
+      // TODO: Implement email service to send reset token
+      logger.info(`Password reset token generated for user: ${user.id}`);
+
+      res.json({ 
+        message: 'Password reset instructions sent to email',
+        // Only include token in development
+        ...(process.env.NODE_ENV !== 'production' && { token: resetToken })
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-};  
+
+  async resetPassword(req, res, next) {
+    try {
+      const { token, password } = req.body;
+
+      const user = await User.findOne({
+        where: {
+          passwordResetToken: token,
+          passwordResetExpires: { [Op.gt]: new Date() }
+        }
+      });
+
+      if (!user) {
+        return next(new Error('Invalid or expired reset token'));
+      }
+
+      user.password = password;
+      user.passwordResetToken = null;
+      user.passwordResetExpires = null;
+      await user.save();
+
+      await logActivity(user.id, 'RESET_PASSWORD', 'User', user.id);
+
+      res.json({ message: 'Password reset successful' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async changePassword(req, res, next) {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      const user = await User.findByPk(req.user.id);
+
+      const isMatch = await user.comparePassword(currentPassword);
+      if (!isMatch) {
+        return next(new Error('Current password is incorrect'));
+      }
+
+      user.password = newPassword;
+      await user.save();
+
+      await logActivity(user.id, 'CHANGE_PASSWORD', 'User', user.id);
+
+      res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateProfile(req, res, next) {
+    try {
+      const { email } = req.body;
+      const user = await User.findByPk(req.user.id);
+
+      const oldValues = { email: user.email };
+      await user.update({ email });
+
+      await logActivity(
+        user.id,
+        'UPDATE_PROFILE',
+        'User',
+        user.id,
+        oldValues,
+        { email }
+      );
+
+      res.json({
+        message: 'Profile updated successfully',
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          roles: user.roles
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+
+export default new AuthController();  

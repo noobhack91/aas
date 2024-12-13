@@ -25,7 +25,7 @@ const installationSchema = z.object({
     'TRADE',
     'GDMC',
     'AUTONOMOUS'
-  ]),  
+  ]),
   po_contract_date: z.string().datetime(),
   equipment: z.string().min(1),
   lead_time_to_deliver: z.number().positive(),
@@ -34,10 +34,11 @@ const installationSchema = z.object({
   has_accessories: z.boolean(),
   // selected_accessories: z.array(z.string()).default([]),
   locations: z.array(locationSchema),
-  selected_accessories: z.array(z.enum(['UPS', 'Stabilizer', 'Battery', 'Printer', 'Computer', 'Monitor', 'Cable', 'Software']))
-    .optional()
-    .nullable()
-});
+  selected_accessories: z.array(z.string()).optional().nullable(),
+  has_consumables: z.boolean(),
+  selected_consumables: z.array(z.string()).optional().nullable()
+})
+
 
 export function validateInstallationRequest(data) {
   return installationSchema.parse(data);

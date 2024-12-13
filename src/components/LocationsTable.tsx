@@ -1,10 +1,13 @@
-import React from 'react';
 import { X } from 'lucide-react';
+import React from 'react';
 
 interface Location {
   districtName: string;
   blockName: string;
   facilityName: string;
+  contactName: string;
+  contactPhone: number;
+  contactEmail: string;
 }
 
 interface LocationsTableProps {
@@ -24,6 +27,9 @@ export const LocationsTable: React.FC<LocationsTableProps> = ({ locations, onRem
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">District Name</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block Name</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Facility Name</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact Name</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact Phone</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact Email</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
@@ -34,6 +40,9 @@ export const LocationsTable: React.FC<LocationsTableProps> = ({ locations, onRem
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{location.districtName}</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{location.blockName}</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{location.facilityName}</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{location.contactName}</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{location.contactPhone}</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{location.contactEmail}</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 <button
                   type="button"

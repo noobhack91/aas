@@ -1,247 +1,313 @@
 import { Parser } from 'json2csv';
 import { Op } from 'sequelize';
 import logger from '../config/logger.js';
-import { Consignee, sequelize, Tender } from '../models/index.js';
+import { 
+  Consignee, 
+  LOA, 
+  PurchaseOrder, 
+  sequelize, 
+  Tender 
+} from '../models/index.js';
+import { logActivity } from '../services/auditService.js';
 
-export const searchTenders = async (req, res) => {
-  try {
-    const {
-      startDate,
-      endDate,
-      tenderNumber,
-      district,
-      block,
-      status,
-      accessoriesPending,
-      installationPending,
-      invoicePending,
-      page = 1,
-      limit = 50
-    } = req.query;
+class TenderController {
+  async searchTenders(req, res, next) {
+    try {
+      const { 
+        page = 1, 
+        limit = 20, 
+        search, 
+        status,
+        startDate,
+        endDate 
+      } = req.query;
 
-    const where = {};
-
-    if (startDate && endDate) {
-      where.createdAt = {
-        [Op.between]: [new Date(startDate), new Date(endDate)]
+      const whereClause = {
+        ...(search && {
+          [Op.or]: [
+            { tenderNumber: { [Op.iLike]: `%${search}%` } },
+            { equipmentName: { [Op.iLike]: `%${search}%` } }
+          ]
+        }),
+        ...(status && { status }),
+        ...(startDate && endDate && {
+          tenderDate: {
+            [Op.between]: [new Date(startDate), new Date(endDate)]
+          }
+        })
       };
-    }
 
-    if (tenderNumber) {
-      where.tenderNumber = {
-        [Op.iLike]: `%${tenderNumber}%`
+      const { rows, count } = await Tender.findAndCountAll({
+        where: whereClause,
+        include: [{
+          model: Consignee,
+          as: 'consignees',
+          attributes: ['consignmentStatus']
+        }],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset: (page - 1) * limit,
+        distinct: true
+      });
+
+      res.json({
+        tenders: rows,
+        total: count,
+        totalPages: Math.ceil(count / limit),
+        currentPage: parseInt(page)
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getTenderById(req, res, next) {
+    try {
+      const { id } = req.params;
+
+      const tender = await Tender.findByPk(id, {
+        include: [{
+          model: Consignee,
+          as: 'consignees',
+          include: ['logisticsDetails', 'challanReceipt', 'installationReport', 'invoice']
+        }]
+      });
+
+      if (!tender) {
+        return next(new Error('Tender not found'));
+      }
+
+      res.json(tender);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createTender(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const tenderData = {
+        ...req.body,
+        createdBy: req.user.id
       };
-    }
 
-    if (status) {
-      where.status = status;
-    }
+      const tender = await Tender.create(tenderData, { transaction });
 
-    if (accessoriesPending) {
-      where.accessoriesPending = accessoriesPending === 'Yes';
-    }
-
-    if (installationPending) {
-      where.installationPending = installationPending === 'Yes';
-    }
-
-    if (invoicePending) {
-      where.invoicePending = invoicePending === 'Yes';
-    }
-
-    const offset = (page - 1) * limit;
-
-    const { count, rows } = await Tender.findAndCountAll({
-      where,
-      include: [{
-        model: Consignee,
-        as: 'consignees',
-        where: district || block ? {
-          [Op.and]: [
-            district ? { districtName: district } : null,
-            block ? { blockName: block } : null
-          ].filter(Boolean)
-        } : undefined,
-        required: !!(district || block)
-      }],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [['createdAt', 'DESC']]
-    });
-
-    logger.info(`Tenders searched with filters: ${JSON.stringify(req.query)}`);
-
-    res.json({
-      tenders: rows,
-      total: count,
-      totalPages: Math.ceil(count / limit),
-      currentPage: parseInt(page)
-    });
-  } catch (error) {
-    logger.error('Error searching tenders:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const getDistricts = async (req, res) => {
-  try {
-    const districts = await Consignee.findAll({
-      attributes: [[sequelize.fn('DISTINCT', sequelize.col('district_name')), 'district']],
-      raw: true
-    });
-
-    res.json(districts.map(d => d.district).filter(Boolean));
-  } catch (error) {
-    logger.error('Error fetching districts:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const getBlocks = async (req, res) => {
-  try {
-    const blocks = await Consignee.findAll({
-      attributes: [[sequelize.fn('DISTINCT', sequelize.col('block_name')), 'block']],
-      raw: true
-    });
-
-    res.json(blocks.map(b => b.block).filter(Boolean));
-  } catch (error) {
-    logger.error('Error fetching blocks:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const getTenderById = async (req, res) => {
-  try {
-    const tender = await Tender.findByPk(req.params.id, {
-      include: [{
-        model: Consignee,
-        as: 'consignees',
-        include: ['logisticsDetails', 'challanReceipt', 'installationReport', 'invoice']
-      }]
-    });
-
-    if (!tender) {
-      return res.status(404).json({ error: 'Tender not found' });
-    }
-
-    res.json(tender);
-  } catch (error) {
-    logger.error('Error fetching tender:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-// server/controllers/tenderController.js
-
-export const createTender = async (req, res) => {
-  try {
-    const {
-      tender_number,
-      authority_type,
-      po_date,
-      contract_date,
-      equipment_name,
-      lead_time_to_deliver,
-      lead_time_to_install,
-      remarks,
-      has_accessories,
-      accessories,
-      locations
-    } = req.body;
-
-    const tender = await Tender.create({
-      tenderNumber: tender_number,
-      authorityType: authority_type,
-      poDate: po_date,
-      contractDate: contract_date,
-      equipmentName: equipment_name,
-      leadTimeToDeliver: lead_time_to_deliver,
-      leadTimeToInstall: lead_time_to_install,
-      remarks,
-      hasAccessories: has_accessories,
-      accessories,
-      accessoriesPending: has_accessories && accessories && accessories.length > 0,
-      status: 'Draft',
-      createdBy: req.user.id
-    });
-
-    if (locations?.length > 0) {
-      await Consignee.bulkCreate(
-        locations.map((loc, index) => ({
-          tenderId: tender.id,
-          srNo: (index + 1).toString(),
-          districtName: loc.districtName,
-          blockName: loc.blockName,
-          facilityName: loc.facilityName,
-          consignmentStatus: 'Processing'
-        }))
+      await logActivity(
+        req.user.id,
+        'CREATE_TENDER',
+        'Tender',
+        tender.id,
+        {},
+        tender.toJSON(),
+        transaction
       );
+
+      await transaction.commit();
+      res.status(201).json(tender);
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
     }
-
-    res.status(201).json(tender);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
   }
-};
-export const exportTenderData = async (req, res) => {
-  try {
-    const { tenderId } = req.params;
 
-    const tender = await Tender.findByPk(tenderId, {
-      include: [{
-        model: Consignee,
-        as: 'consignees',
-        include: [
-          'logisticsDetails',
-          'challanReceipt',
-          'installationReport',
-          'invoice'
-        ]
-      }]
-    });
+  async updateTender(req, res, next) {
+    const transaction = await sequelize.transaction();
+    
+    try {
+      const { id } = req.params;
+      const updateData = req.body;
 
-    if (!tender) {
-      return res.status(404).json({ error: 'Tender not found' });
+      const tender = await Tender.findByPk(id);
+      if (!tender) {
+        return next(new Error('Tender not found'));
+      }
+
+      const oldValues = tender.toJSON();
+      await tender.update(updateData, { transaction });
+
+      await logActivity(
+        req.user.id,
+        'UPDATE_TENDER',
+        'Tender',
+        id,
+        oldValues,
+        tender.toJSON(),
+        transaction
+      );
+
+      await transaction.commit();
+      res.json(tender);
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
     }
-
-    const fields = [
-      'SR No',
-      'District',
-      'Block',
-      'Facility',
-      'Status',
-      'Logistics Date',
-      'Courier Name',
-      'Docket Number',
-      'Challan Date',
-      'Installation Date',
-      'Invoice Date',
-      'Accessories Pending'
-    ];
-
-    const data = tender.consignees.map(consignee => ({
-      'SR No': consignee.srNo,
-      'District': consignee.districtName,
-      'Block': consignee.blockName,
-      'Facility': consignee.facilityName,
-      'Status': consignee.consignmentStatus,
-      'Logistics Date': consignee.logisticsDetails?.date || '',
-      'Courier Name': consignee.logisticsDetails?.courierName || '',
-      'Docket Number': consignee.logisticsDetails?.docketNumber || '',
-      'Challan Date': consignee.challanReceipt?.date || '',
-      'Installation Date': consignee.installationReport?.date || '',
-      'Invoice Date': consignee.invoice?.date || '',
-      'Accessories Pending': consignee.accessoriesPending.items.join(', ')
-    }));
-
-    const json2csvParser = new Parser({ fields });
-    const csv = json2csvParser.parse(data);
-
-    res.header('Content-Type', 'text/csv');
-    res.attachment(`tender_${tender.tenderNumber}_report.csv`);
-    res.send(csv);
-  } catch (error) {
-    logger.error('Error exporting tender data:', error);
-    res.status(500).json({ error: error.message });
   }
-};  
+
+  async deleteTender(req, res, next) {
+    const transaction = await sequelize.transaction();
+    
+    try {
+      const { id } = req.params;
+
+      const tender = await Tender.findByPk(id);
+      if (!tender) {
+        return next(new Error('Tender not found'));
+      }
+
+      // Check if tender can be deleted
+      const hasActiveConsignees = await Consignee.count({
+        where: {
+          tenderId: id,
+          consignmentStatus: {
+            [Op.notIn]: ['Draft', 'Cancelled']
+          }
+        }
+      });
+
+      if (hasActiveConsignees) {
+        return next(new Error('Cannot delete tender with active consignees'));
+      }
+
+      await tender.destroy({ transaction });
+
+      await logActivity(
+        req.user.id,
+        'DELETE_TENDER',
+        'Tender',
+        id,
+        tender.toJSON(),
+        {},
+        transaction
+      );
+
+      await transaction.commit();
+      res.json({ message: 'Tender deleted successfully' });
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
+    }
+  }
+
+  async getDistricts(req, res, next) {
+    try {
+      const districts = await Consignee.findAll({
+        attributes: [
+          [sequelize.fn('DISTINCT', sequelize.col('districtName')), 'district']
+        ],
+        where: {
+          districtName: {
+            [Op.not]: null
+          }
+        },
+        order: [['districtName', 'ASC']]
+      });
+
+      res.json(districts.map(d => d.get('district')));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getBlocks(req, res, next) {
+    try {
+      const { district } = req.query;
+
+      const whereClause = {
+        blockName: {
+          [Op.not]: null
+        },
+        ...(district && { districtName: district })
+      };
+
+      const blocks = await Consignee.findAll({
+        attributes: [
+          [sequelize.fn('DISTINCT', sequelize.col('blockName')), 'block']
+        ],
+        where: whereClause,
+        order: [['blockName', 'ASC']]
+      });
+
+      res.json(blocks.map(b => b.get('block')));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async exportTenderData(req, res, next) {
+    try {
+      const { tenderId } = req.params;
+      const { format = 'csv' } = req.query;
+
+      const tender = await Tender.findByPk(tenderId, {
+        include: [{
+          model: Consignee,
+          as: 'consignees',
+          include: ['logisticsDetails', 'challanReceipt', 'installationReport']
+        }]
+      });
+
+      if (!tender) {
+        return next(new Error('Tender not found'));
+      }
+
+      if (format === 'csv') {
+        const parser = new Parser();
+        const csv = parser.parse(tender.consignees);
+        
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=tender_${tenderId}.csv`);
+        res.send(csv);
+      } else {
+        res.json(tender);
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getTenderStats(req, res, next) {
+    try {
+      const [
+        statusStats,
+        consigneeStats,
+        monthlyStats
+      ] = await Promise.all([
+        Tender.findAll({
+          attributes: [
+            'status',
+            [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+          ],
+          group: ['status']
+        }),
+        Consignee.findAll({
+          attributes: [
+            'consignmentStatus',
+            [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+          ],
+          group: ['consignmentStatus']
+        }),
+        Tender.findAll({
+          attributes: [
+            [sequelize.fn('date_trunc', 'month', sequelize.col('createdAt')), 'month'],
+            [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+          ],
+          group: [sequelize.fn('date_trunc', 'month', sequelize.col('createdAt'))],
+          order: [[sequelize.fn('date_trunc', 'month', sequelize.col('createdAt')), 'DESC']],
+          limit: 12
+        })
+      ]);
+
+      res.json({
+        byStatus: statusStats,
+        byConsigneeStatus: consigneeStats,
+        monthlyTrend: monthlyStats
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+
+export default new TenderController();  

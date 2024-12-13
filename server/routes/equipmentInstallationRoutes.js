@@ -1,11 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import {
-  createInstallationRequest,
-  getInstallationRequests,
-  uploadConsigneeCSV,
-  downloadTemplate
-} from '../controllers/equipmentInstallationController.js';
+import equipmentInstallationController from '../controllers/equipmentInstallationController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -13,10 +8,37 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(authenticate);
 
-// Rename routes to reflect that we're working with tenders
-router.post('/', authorize('admin'), createInstallationRequest);
-router.get('/', authorize('admin', 'logistics', 'installation'), getInstallationRequests);
-router.post('/upload-csv', authorize('admin'), upload.single('file'), uploadConsigneeCSV);
-router.get('/template', authorize('admin'), downloadTemplate);
+// Installation requests
+router.post(
+  '/',
+  authorize('admin', 'installer'),
+  equipmentInstallationController.createInstallationRequest
+);
+
+router.get(
+  '/',
+  authorize('admin', 'installer', 'logistics_manager'),
+  equipmentInstallationController.getInstallationRequests
+);
+
+router.patch(
+  '/:id/status',
+  authorize('admin', 'installer'),
+  equipmentInstallationController.updateInstallationStatus
+);
+
+// CSV operations
+router.post(
+  '/:id/upload-csv',
+  authorize('admin', 'installer'),
+  upload.single('file'),
+  equipmentInstallationController.processCSVUpload
+);
+
+router.get(
+  '/template',
+  authorize('admin', 'installer'),
+  equipmentInstallationController.downloadTemplate
+);
 
 export default router;
