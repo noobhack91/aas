@@ -51,40 +51,12 @@ export default (sequelize) => {
       defaultValue: false
     },
     selectedAccessories: {
-      type: DataTypes.JSONB,
-      defaultValue: {
-        items: [],
-        pending: []
-      },
-      get() {
-        const value = this.getDataValue('selectedAccessories');
-        return value ? value : { items: [], pending: [] };
-      },
-      set(value) {
-        if (typeof value === 'string') {
-          this.setDataValue('selectedAccessories', JSON.parse(value));
-        } else {
-          this.setDataValue('selectedAccessories', value);
-        }
-      }
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      defaultValue: []
     },
     selectedConsumables: {
-      type: DataTypes.JSONB,
-      defaultValue: {
-        items: [],
-        pending: []
-      },
-      get() {
-        const value = this.getDataValue('selectedConsumables');
-        return value ? value : { items: [], pending: [] };
-      },
-      set(value) {
-        if (typeof value === 'string') {
-          this.setDataValue('selectedConsumables', JSON.parse(value));
-        } else {
-          this.setDataValue('selectedConsumables', value);
-        }
-      }
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      defaultValue: []
     },
     status: {
       type: DataTypes.ENUM(
@@ -98,11 +70,13 @@ export default (sequelize) => {
     },
     accessoriesPending: {
       type: DataTypes.BOOLEAN,
-      defaultValue: false
+      defaultValue: false,
+      allowNull: false
     },
     consumablesPending: {
       type: DataTypes.BOOLEAN,
-      defaultValue: false
+      defaultValue: false,
+      allowNull: false
     },
     installationPending: {
       type: DataTypes.BOOLEAN,
@@ -119,46 +93,6 @@ export default (sequelize) => {
       references: {
         model: 'users',
         key: 'id'
-      }
-    },
-    tenderStartDate: {
-      type: DataTypes.DATE,
-      allowNull: false
-    },
-    tenderEndDate: {
-      type: DataTypes.DATE,
-      allowNull: false
-    },
-    tenderDocument: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
-    loaNumber: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    loaDate: {
-      type: DataTypes.DATE,
-      allowNull: false
-    },
-    loaDocument: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
-    poNumber: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    poDocument: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
-    machineQuantity: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 1,
-      validate: {
-        min: 1
       }
     }
   }, {

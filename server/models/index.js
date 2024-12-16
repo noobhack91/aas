@@ -4,7 +4,8 @@ import defineAccessory from './definitions/Accessory.js';
 import defineChallanReceipt from './definitions/ChallanReceipt.js';
 import defineConsignee from './definitions/Consignee.js';
 import defineConsumable from './definitions/Consumable.js';
-import defineMachine from './definitions/Machine.js';
+import EquipmentInstallation from './definitions/EquipmentInstallation.js';
+import EquipmentLocation from './definitions/EquipmentLocation.js';
 import defineInstallationReport from './definitions/InstallationReport.js';
 import defineInvoice from './definitions/Invoice.js';
 import defineLogisticsDetails from './definitions/LogisticsDetails.js';
@@ -13,14 +14,12 @@ import defineUser from './definitions/User.js';
 
 dotenv.config();
 
-// Initialize Sequelize with database configuration
 const sequelize = new Sequelize(
   process.env.DB_NAME || "equipment_management",
   process.env.DB_USER || "postgres",
   process.env.DB_PASSWORD || "admin",
   {
-    host: process.env.DB_HOST || "localhost",
-    dialect: "postgres",
+    host: process.env.DB_HOST,
     logging: false,
     pool: {
       max: 5,
@@ -28,6 +27,7 @@ const sequelize = new Sequelize(
       acquire: 30000,
       idle: 10000
     },
+    dialect: "postgres",
     dialectOptions: process.env.NODE_ENV === 'production' ? {
       ssl: {
         require: true,
@@ -37,7 +37,7 @@ const sequelize = new Sequelize(
   }
 );
 
-// Initialize models
+// Initialize models  
 const User = defineUser(sequelize);
 const Tender = defineTender(sequelize);
 const Consignee = defineConsignee(sequelize);
@@ -45,131 +45,138 @@ const LogisticsDetails = defineLogisticsDetails(sequelize);
 const ChallanReceipt = defineChallanReceipt(sequelize);
 const InstallationReport = defineInstallationReport(sequelize);
 const Invoice = defineInvoice(sequelize);
+const EquipmentInstallationModel = EquipmentInstallation.init(sequelize);
+const EquipmentLocationModel = EquipmentLocation.init(sequelize);
 const Accessory = defineAccessory(sequelize);
 const Consumable = defineConsumable(sequelize);
-const Machine = defineMachine(sequelize);
 
-// Define associations
-const defineAssociations = () => {
-  // Tender associations
-  Tender.hasMany(Consignee, {
-    foreignKey: 'tenderId',
-    as: 'consignees'
-  });
+// Define associations  
+Tender.hasMany(Consignee, {
+  foreignKey: 'tenderId',
+  as: 'consignees'
+});
 
-  Tender.belongsToMany(Machine, {
-    through: 'tender_machines',
-    foreignKey: 'tender_id',
-    otherKey: 'machine_id',
-    as: 'machines'
-  });
+Consignee.belongsTo(Tender, {
+  foreignKey: 'tenderId'
+});
 
-  // Consignee associations
-  Consignee.belongsTo(Tender, {
-    foreignKey: 'tenderId'
-  });
+// Add Accessory and Consumable associations with Tender  
+Tender.belongsToMany(Accessory, {
+  through: 'TenderAccessories',
+  foreignKey: 'tenderId',
+  otherKey: 'accessoryId',
+  as: 'accessories'
+});
 
-  Consignee.hasOne(LogisticsDetails, {
-    foreignKey: 'consigneeId',
-    as: 'logisticsDetails'
-  });
+Accessory.belongsToMany(Tender, {
+  through: 'TenderAccessories',
+  foreignKey: 'accessoryId',
+  otherKey: 'tenderId',
+  as: 'tenders'
+});
 
-  Consignee.hasOne(ChallanReceipt, {
-    foreignKey: 'consigneeId',
-    as: 'challanReceipt'
-  });
+Tender.belongsToMany(Consumable, {
+  through: 'TenderConsumables',
+  foreignKey: 'tenderId',
+  otherKey: 'consumableId',
+  as: 'consumables'
+});
 
-  Consignee.hasOne(InstallationReport, {
-    foreignKey: 'consigneeId',
-    as: 'installationReport'
-  });
+Consumable.belongsToMany(Tender, {
+  through: 'TenderConsumables',
+  foreignKey: 'consumableId',
+  otherKey: 'tenderId',
+  as: 'tenders'
+});
 
-  Consignee.hasOne(Invoice, {
-    foreignKey: 'consigneeId',
-    as: 'invoice'
-  });
+// Existing associations  
+Consignee.hasOne(LogisticsDetails, {
+  foreignKey: 'consigneeId',
+  as: 'logisticsDetails'
+});
 
-  // Machine associations
-  Machine.belongsToMany(Tender, {
-    through: 'tender_machines',
-    foreignKey: 'machine_id',
-    otherKey: 'tender_id',
-    as: 'tenders'
-  });
+LogisticsDetails.belongsTo(Consignee, {
+  foreignKey: 'consigneeId'
+});
 
-  // Document associations
-  LogisticsDetails.belongsTo(Consignee, {
-    foreignKey: 'consigneeId'
-  });
+Consignee.hasOne(ChallanReceipt, {
+  foreignKey: 'consigneeId',
+  as: 'challanReceipt'
+});
 
-  ChallanReceipt.belongsTo(Consignee, {
-    foreignKey: 'consigneeId'
-  });
+ChallanReceipt.belongsTo(Consignee, {
+  foreignKey: 'consigneeId'
+});
 
-  InstallationReport.belongsTo(Consignee, {
-    foreignKey: 'consigneeId'
-  });
+Consignee.hasOne(InstallationReport, {
+  foreignKey: 'consigneeId',
+  as: 'installationReport'
+});
 
-  Invoice.belongsTo(Consignee, {
-    foreignKey: 'consigneeId'
-  });
+InstallationReport.belongsTo(Consignee, {
+  foreignKey: 'consigneeId'
+});
 
-  // User associations (for tracking who created records)
-  Tender.belongsTo(User, {
-    foreignKey: 'createdBy',
-    as: 'creator'
-  });
+Consignee.hasOne(Invoice, {
+  foreignKey: 'consigneeId',
+  as: 'invoice'
+});
 
-  LogisticsDetails.belongsTo(User, {
-    foreignKey: 'createdBy',
-    as: 'creator'
-  });
+Invoice.belongsTo(Consignee, {
+  foreignKey: 'consigneeId'
+});
 
-  ChallanReceipt.belongsTo(User, {
-    foreignKey: 'createdBy',
-    as: 'creator'
-  });
+EquipmentInstallation.hasMany(EquipmentLocation, {
+  foreignKey: 'installationId',
+  as: 'locations'
+});
 
-  InstallationReport.belongsTo(User, {
-    foreignKey: 'createdBy',
-    as: 'creator'
-  });
+EquipmentLocation.belongsTo(EquipmentInstallation, {
+  foreignKey: 'installationId'
+});
+// In models/index.js, modify the associations section:  
 
-  Invoice.belongsTo(User, {
-    foreignKey: 'createdBy',
-    as: 'creator'
-  });
-};
+// For Accessories  
+Tender.belongsToMany(Accessory, {
+  through: 'TenderAccessories',
+  foreignKey: 'tenderId',
+  otherKey: 'accessoryId',
+  as: 'accessoryItems'
+});
 
-// Initialize associations
-defineAssociations();
+Accessory.belongsToMany(Tender, {
+  through: 'TenderAccessories',
+  foreignKey: 'accessoryId',
+  otherKey: 'tenderId',
+  as: 'accessoryTenders' // Changed from 'tenders' to 'accessoryTenders'  
+});
 
-// Export all models and sequelize instance
+// For Consumables  
+Tender.belongsToMany(Consumable, {
+  through: 'TenderConsumables',
+  foreignKey: 'tenderId',
+  otherKey: 'consumableId',
+  as: 'consumableItems'
+});
+
+Consumable.belongsToMany(Tender, {
+  through: 'TenderConsumables',
+  foreignKey: 'consumableId',
+  otherKey: 'tenderId',
+  as: 'consumableTenders' // Changed from 'tenders' to 'consumableTenders'  
+});
+
 export {
-  User,
-  Tender,
-  Consignee,
-  LogisticsDetails,
+  Accessory,
   ChallanReceipt,
+  Consignee,
+  Consumable,
+  EquipmentInstallation,
+  EquipmentLocation,
   InstallationReport,
   Invoice,
-  Accessory,
-  Consumable,
-  Machine,
-  sequelize
-};
-
-const models = {
-  User,
-  Tender,
-  Consignee,
   LogisticsDetails,
-  ChallanReceipt,
-  InstallationReport,
-  Invoice,
-  Accessory,
-  Consumable,
-  Machine
+  sequelize,
+  Tender,
+  User
 };
-
-export default models;

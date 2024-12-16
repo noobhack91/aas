@@ -37,7 +37,6 @@ try {
 // Initialize Azure Storage containers
 createContainers().catch(err => {
   logger.error('Failed to initialize Azure containers:', err);
-  process.exit(1); // Exit if container initialization fails
 });
 
 // Routes
@@ -49,12 +48,12 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 // Start server
-sequelize.sync({ alter: true }).then(() => {
+sequelize.sync().then(() => {
   app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);
   });
 }).catch(err => {
-  logger.error('Database sync failed:', err);
+  logger.error('Database connection failed:', err);
 });
 
 export default app;

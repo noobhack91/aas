@@ -8,7 +8,6 @@ import equipmentInstallationRoutes from './equipmentInstallationRoutes.js';
 import tenderRoutes from './tenderRoutes.js';
 import uploadRoutes from './uploadRoutes.js';
 import itemsRoutes from './itemsRoutes.js';
-import machineRoutes from './machineRoutes.js';
 
 
 const router = express.Router();
@@ -24,6 +23,5 @@ router.use('/upload', authenticate, uploadRoutes);
 router.use('/equipment-installation', authenticate, equipmentInstallationRoutes);
 router.use('/admin',authenticate, adminRoutes);
 router.use('/items', authenticate, itemsRoutes);  
-router.use('/machines', authenticate, machineRoutes);
 
 export default router;

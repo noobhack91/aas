@@ -17,13 +17,10 @@ const blobServiceClient = BlobServiceClient.fromConnectionString(connectionStrin
 
 // Define container names in an object for easy management
 export const containers = {
-  LOGISTICS: 'logistics-docs',
-  CHALLAN: 'challan-docs',
-  INSTALLATION: 'installation-docs',
-  INVOICE: 'invoice-docs',
-  TENDER: 'tender-docs',
-  LOA: 'loa-docs',
-  PO: 'po-docs'
+  LOGISTICS: process.env.AZURE_CONTAINER_LOGISTICS,
+  CHALLAN: process.env.AZURE_CONTAINER_CHALLAN,
+  INSTALLATION: process.env.AZURE_CONTAINER_INSTALLATION,
+  INVOICE: process.env.AZURE_CONTAINER_INVOICE
 };
 
 // Helper function to check if the container exists and create if not
@@ -52,15 +49,14 @@ export async function createContainers() {
 }
 
 // Upload file to Azure Blob Storage
-export async function uploadFile(file, containerType) {
+export async function uploadFile(file, containerName) {
   // Validate the file and container name
   if (!file?.buffer) {
     throw new Error('Invalid file data');
   }
 
-  const containerName = containers[containerType];
-  if (!containerName) {
-    throw new Error(`Invalid container type: ${containerType}`);
+  if (!Object.values(containers).includes(containerName)) {
+    throw new Error('Invalid container name');
   }
 
   try {
