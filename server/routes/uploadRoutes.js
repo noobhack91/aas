@@ -1,49 +1,52 @@
 import express from 'express';
-import uploadController from '../controllers/uploadController.js';
 import { upload } from '../middleware/upload.js';
 import { authenticate, authorize } from '../middleware/auth.js';
+import {
+  uploadLogistics,
+  uploadChallan,
+  uploadInstallation,
+  uploadInvoice,
+  deleteFile
+} from '../controllers/uploadController.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 
-// Logistics documents
+// File upload routes
 router.post(
   '/logistics',
-  authorize('logistics_manager', 'admin'),
+  authorize('logistics', 'admin'),
   upload.array('documents', 5),
-  uploadController.uploadLogistics
+  uploadLogistics
 );
 
-// Challan receipt
 router.post(
   '/challan',
-  authorize('logistics_manager', 'admin'),
+  authorize('challan', 'admin'),
   upload.single('file'),
-  uploadController.uploadChallan
+  uploadChallan
 );
 
-// Installation report
 router.post(
   '/installation',
-  authorize('installer', 'admin'),
+  authorize('installation', 'admin'),
   upload.single('file'),
-  uploadController.uploadInstallation
+  uploadInstallation
 );
 
-// Invoice
 router.post(
   '/invoice',
-  authorize('finance_manager', 'admin'),
+  authorize('invoice', 'admin'),
   upload.single('file'),
-  uploadController.uploadInvoice
+  uploadInvoice
 );
 
-// File deletion
+// File deletion routes
 router.delete(
-  '/file',
-  authorize('admin'),
-  uploadController.deleteFile
+  '/:type/file',
+  authorize('admin', 'logistics', 'challan', 'installation', 'invoice'),
+  deleteFile
 );
 
 export default router;

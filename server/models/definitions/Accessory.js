@@ -13,20 +13,13 @@ export default (sequelize) => {
       allowNull: false,  
       unique: true  
     },  
-    description: {  
-      type: DataTypes.TEXT,  
-      allowNull: true  
-    },  
-    documents: {  
-      type: DataTypes.ARRAY(DataTypes.STRING),  
-      defaultValue: []  
-    },  
     isActive: {  
       type: DataTypes.BOOLEAN,  
       defaultValue: true  
     }  
   }, {  
     tableName: 'accessories',  
+    underscored: true,  
     timestamps: true  
   });  
 

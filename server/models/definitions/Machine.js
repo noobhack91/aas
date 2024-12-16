@@ -9,30 +9,16 @@ export default (sequelize) => {
     },
     name: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      unique: true
     },
-    model: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    manufacturer: {
-      type: DataTypes.STRING,
-      allowNull: false
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true
     },
     specifications: {
       type: DataTypes.JSONB,
       defaultValue: {}
-    },
-    warrantyPeriod: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      validate: {
-        min: 0
-      }
-    },
-    documents: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      defaultValue: []
     },
     isActive: {
       type: DataTypes.BOOLEAN,
@@ -40,6 +26,7 @@ export default (sequelize) => {
     }
   }, {
     tableName: 'machines',
+    underscored: true,
     timestamps: true
   });
 

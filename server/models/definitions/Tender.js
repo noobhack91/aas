@@ -10,37 +10,18 @@ export default (sequelize) => {
     tenderNumber: {
       type: DataTypes.STRING,
       unique: true,
-      allowNull: false,
-      validate: {
-        notEmpty: true
-      }
+      allowNull: false
     },
     authorityType: {
       type: DataTypes.ENUM(
-        'UPMSCL', 'AUTONOMOUS', 'CMSD', 'DGME', 'AIIMS', 'SGPGI', 
-        'KGMU', 'BHU', 'BMSICL', 'OSMCL', 'TRADE', 'GDMC', 'AMSCL'
+        'UPMSCL', 'AUTONOMOUS', 'CMSD', 'DGME', 'AIIMS', 'SGPGI', 'KGMU', 'BHU',
+        'BMSICL', 'OSMCL', 'TRADE', 'GDMC', 'AMSCL'
       ),
       allowNull: false
     },
-    tenderDate: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      validate: {
-        isDate: true,
-        isBefore: new Date().toISOString()
-      }
-    },
     poDate: {
       type: DataTypes.DATE,
-      allowNull: false,
-      validate: {
-        isDate: true,
-        isAfterTenderDate(value) {
-          if (value < this.tenderDate) {
-            throw new Error('PO date must be after tender date');
-          }
-        }
-      }
+      allowNull: false
     },
     contractDate: {
       type: DataTypes.DATE,
@@ -48,38 +29,15 @@ export default (sequelize) => {
     },
     leadTimeToInstall: {
       type: DataTypes.INTEGER,
-      allowNull: false,
-      validate: {
-        min: 1,
-        max: 365
-      }
+      allowNull: false
     },
     leadTimeToDeliver: {
       type: DataTypes.INTEGER,
-      allowNull: false,
-      validate: {
-        min: 1,
-        max: 365
-      }
+      allowNull: false
     },
     equipmentName: {
       type: DataTypes.STRING,
       allowNull: false
-    },
-    description: {
-      type: DataTypes.TEXT,
-      allowNull: false
-    },
-    documentPath: {
-      type: DataTypes.STRING,
-      allowNull: true,
-      validate: {
-        isValidPath(value) {
-          if (value && !/^[\w\-\/\.]+$/.test(value)) {
-            throw new Error('Invalid document path');
-          }
-        }
-      }
     },
     remarks: {
       type: DataTypes.TEXT
@@ -93,93 +51,121 @@ export default (sequelize) => {
       defaultValue: false
     },
     selectedAccessories: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      defaultValue: []
+      type: DataTypes.JSONB,
+      defaultValue: {
+        items: [],
+        pending: []
+      },
+      get() {
+        const value = this.getDataValue('selectedAccessories');
+        return value ? value : { items: [], pending: [] };
+      },
+      set(value) {
+        if (typeof value === 'string') {
+          this.setDataValue('selectedAccessories', JSON.parse(value));
+        } else {
+          this.setDataValue('selectedAccessories', value);
+        }
+      }
     },
     selectedConsumables: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      defaultValue: []
+      type: DataTypes.JSONB,
+      defaultValue: {
+        items: [],
+        pending: []
+      },
+      get() {
+        const value = this.getDataValue('selectedConsumables');
+        return value ? value : { items: [], pending: [] };
+      },
+      set(value) {
+        if (typeof value === 'string') {
+          this.setDataValue('selectedConsumables', JSON.parse(value));
+        } else {
+          this.setDataValue('selectedConsumables', value);
+        }
+      }
     },
     status: {
       type: DataTypes.ENUM(
         'Draft',
-        'Active',
         'In Progress',
-        'Completed',
-        'Closed'
+        'Partially Completed',
+        'Completed'
       ),
-      defaultValue: 'Draft'
+      defaultValue: 'Draft',
+      allowNull: false
     },
-    progressStatus: {
-      type: DataTypes.JSONB,
-      defaultValue: {
-        accessories: false,
-        consumables: false,
-        installation: false,
-        invoice: false
-      }
+    accessoriesPending: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false
+    },
+    consumablesPending: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false
+    },
+    installationPending: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+      allowNull: false
+    },
+    invoicePending: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+      allowNull: false
     },
     createdBy: {
       type: DataTypes.UUID,
-      allowNull: false,
       references: {
         model: 'users',
         key: 'id'
+      }
+    },
+    tenderStartDate: {
+      type: DataTypes.DATE,
+      allowNull: false
+    },
+    tenderEndDate: {
+      type: DataTypes.DATE,
+      allowNull: false
+    },
+    tenderDocument: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    loaNumber: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    loaDate: {
+      type: DataTypes.DATE,
+      allowNull: false
+    },
+    loaDocument: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    poNumber: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    poDocument: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    machineQuantity: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1,
+      validate: {
+        min: 1
       }
     }
   }, {
     tableName: 'tenders',
     underscored: true,
-    timestamps: true,
-    indexes: [
-      {
-        unique: true,
-        fields: ['tender_number']
-      },
-      {
-        fields: ['status']
-      },
-      {
-        fields: ['created_by']
-      }
-    ],
-    hooks: {
-      beforeValidate: (tender) => {
-        if (tender.tenderDate && tender.poDate) {
-          if (tender.poDate < tender.tenderDate) {
-            throw new Error('PO date cannot be before tender date');
-          }
-        }
-      },
-      afterCreate: async (tender, options) => {
-        await logActivity(
-          options.userId,
-          'CREATE',
-          'Tender',
-          tender.id,
-          {},
-          tender.toJSON()
-        );
-      }
-    }
+    timestamps: true
   });
-
-  Tender.prototype.updateStatus = async function() {
-    const allSteps = ['accessories', 'consumables', 'installation', 'invoice'];
-    const completedSteps = Object.entries(this.progressStatus)
-      .filter(([_, isComplete]) => isComplete)
-      .map(([step]) => step);
-
-    if (completedSteps.length === 0) {
-      this.status = 'Draft';
-    } else if (completedSteps.length === allSteps.length) {
-      this.status = 'Completed';
-    } else {
-      this.status = 'In Progress';
-    }
-
-    await this.save();
-  };
 
   return Tender;
 };

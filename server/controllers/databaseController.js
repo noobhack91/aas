@@ -1,277 +1,107 @@
 import bcrypt from 'bcryptjs';
-import { Op } from 'sequelize';
+import dotenv from 'dotenv';
 import logger from '../config/logger.js';
-import { 
-  Accessory,
-  AuditLog,
-  Consignee, 
-  Consumable,
-  LOA,
-  Machine,
-  PurchaseOrder,
-  Role,
-  sequelize, 
-  Tender, 
-  User 
-} from '../models/index.js';
+import { Consignee, sequelize, Tender, User } from '../models/index.js';
 
-class DatabaseController {
-  async initializeDatabase(req, res, next) {
-    const transaction = await sequelize.transaction();
+dotenv.config();
 
-    try {
-      // Drop and recreate all tables
-      await sequelize.sync({ force: true });
-      logger.info('Database tables recreated successfully');
+export const initializeDatabase = async (req, res) => {
+  const transaction = await sequelize.transaction();
 
-      // Create default roles
-      const roles = await this.createDefaultRoles(transaction);
-      logger.info('Default roles created successfully');
+  try {
+    // Drop and recreate all tables
+    await sequelize.sync({ force: true });
+    logger.info('Database tables recreated successfully');
 
-      // Create default admin user
-      const adminUser = await this.createAdminUser(transaction);
-      logger.info('Admin user created successfully');
+    // Create default users
+    const password = await bcrypt.hash(process.env.DEFAULT_PASSWORD || 'admin123', 10);
+    const roles = ['admin', 'logistics', 'challan', 'installation', 'invoice'];
 
-      // Create sample data if in development
-      if (process.env.NODE_ENV === 'development') {
-        await this.createSampleData(transaction, adminUser.id);
-        logger.info('Sample data created successfully');
-      }
-
-      await transaction.commit();
-
-      res.json({
-        message: 'Database initialized successfully',
-        roles: roles.map(r => r.name),
-        adminUser: {
-          username: adminUser.username,
-          email: adminUser.email
-        }
-      });
-    } catch (error) {
-      await transaction.rollback();
-      logger.error('Database initialization failed:', error);
-      next(error);
+    const users = [];
+    for (const role of roles) {
+      const user = await User.create({
+        username: role,
+        email: `${role}@example.com`,
+        password,
+        role,
+        isActive: true
+      }, { transaction });
+      users.push(user);
+      logger.info(`Created user with role: ${role}`);
     }
-  }
 
-  async createDefaultRoles(transaction) {
-    const roleDefinitions = [
+    // Create sample tenders
+    const tenders = await Tender.bulkCreate([
       {
-        name: 'Admin',
-        permissions: {
-          users: ['create', 'read', 'update', 'delete'],
-          roles: ['create', 'read', 'update', 'delete'],
-          tenders: ['create', 'read', 'update', 'delete'],
-          items: ['create', 'read', 'update', 'delete']
-        }
+        tenderNumber: 'TENDER/2024/001',
+        authorityType: 'State Health Department',
+        poDate: new Date('2024-03-01'),
+        contractDate: new Date('2024-02-15'),
+        leadTimeToInstall: 30,
+        leadTimeToDeliver: 15,
+        equipmentName: 'X-Ray Machine',
+        status: 'Pending',
+        accessoriesPending: false,
+        installationPending: true,
+        invoicePending: true
       },
       {
-        name: 'Tender Manager',
-        permissions: {
-          tenders: ['create', 'read', 'update'],
-          items: ['read']
-        }
-      },
-      {
-        name: 'Logistics Manager',
-        permissions: {
-          tenders: ['read'],
-          consignees: ['read', 'update'],
-          logistics: ['create', 'read', 'update']
-        }
-      },
-      {
-        name: 'Installer',
-        permissions: {
-          tenders: ['read'],
-          consignees: ['read'],
-          installation: ['create', 'read', 'update']
-        }
-      },
-      {
-        name: 'Finance Manager',
-        permissions: {
-          tenders: ['read'],
-          invoices: ['create', 'read', 'update']
-        }
-      },
-      {
-        name: 'Viewer',
-        permissions: {
-          tenders: ['read'],
-          consignees: ['read'],
-          items: ['read']
-        }
-      }
-    ];
-
-    return await Role.bulkCreate(roleDefinitions, { transaction });
-  }
-
-  async createAdminUser(transaction) {
-    const password = await bcrypt.hash(
-      process.env.DEFAULT_ADMIN_PASSWORD || 'admin123', 
-      10
-    );
-
-    return await User.create({
-      username: process.env.DEFAULT_ADMIN_USERNAME || 'admin',
-      email: process.env.DEFAULT_ADMIN_EMAIL || 'admin@example.com',
-      password,
-      roles: ['Admin'],
-      isActive: true
-    }, { transaction });
-  }
-
-  async createSampleData(transaction, adminUserId) {
-    // Create sample machines
-    const machines = await Machine.bulkCreate([
-      {
-        name: 'Machine Type A',
-        code: 'MTA-001',
-        specifications: {
-          power: '220V',
-          weight: '100kg',
-          dimensions: '100x50x75cm'
-        },
-        createdBy: adminUserId
-      },
-      {
-        name: 'Machine Type B',
-        code: 'MTB-001',
-        specifications: {
-          power: '110V',
-          weight: '75kg',
-          dimensions: '80x40x60cm'
-        },
-        createdBy: adminUserId
+        tenderNumber: 'TENDER/2024/002',
+        authorityType: 'Central Medical Supplies',
+        poDate: new Date('2024-03-05'),
+        contractDate: new Date('2024-02-20'),
+        leadTimeToInstall: 45,
+        leadTimeToDeliver: 20,
+        equipmentName: 'MRI Scanner',
+        status: 'Partially Completed',
+        accessoriesPending: true,
+        installationPending: true,
+        invoicePending: true
       }
     ], { transaction });
 
-    // Create sample accessories
-    const accessories = await Accessory.bulkCreate([
+    // Create sample consignees
+    const consignees = await Consignee.bulkCreate([
       {
-        name: 'Power Cable',
-        code: 'ACC-001',
-        specifications: { length: '2m' },
-        createdBy: adminUserId
+        tenderId: tenders[0].id,
+        srNo: 'SR001',
+        districtName: 'North District',
+        blockName: 'Block A',
+        facilityName: 'City Hospital',
+        consignmentStatus: 'Processing',
+        accessoriesPending: {
+          status: false,
+          count: 0,
+          items: []
+        }
       },
       {
-        name: 'Data Cable',
-        code: 'ACC-002',
-        specifications: { length: '3m' },
-        createdBy: adminUserId
-      }
-    ], { transaction });
-
-    // Create sample consumables
-    const consumables = await Consumable.bulkCreate([
-      {
-        name: 'Test Strips',
-        code: 'CON-001',
-        specifications: { quantity: '100/box' },
-        createdBy: adminUserId
-      },
-      {
-        name: 'Reagent',
-        code: 'CON-002',
-        specifications: { volume: '500ml' },
-        createdBy: adminUserId
-      }
-    ], { transaction });
-
-    // Create sample tender
-    const tender = await Tender.create({
-      tenderNumber: 'TENDER-2024-001',
-      authorityType: 'UPMSCL',
-      tenderDate: new Date(),
-      poDate: new Date(),
-      contractDate: new Date(),
-      equipmentName: 'Medical Equipment A',
-      description: 'Sample tender for testing',
-      leadTimeToDeliver: 30,
-      leadTimeToInstall: 15,
-      hasAccessories: true,
-      hasConsumables: true,
-      createdBy: adminUserId
-    }, { transaction });
-
-    // Create sample LOA
-    const loa = await LOA.create({
-      tenderId: tender.id,
-      loaNumber: 'LOA-2024-001',
-      loaDate: new Date(),
-      status: 'Active',
-      createdBy: adminUserId
-    }, { transaction });
-
-    // Create sample Purchase Order
-    await PurchaseOrder.create({
-      loaId: loa.id,
-      machineId: machines[0].id,
-      poNumber: 'PO-2024-001',
-      poDate: new Date(),
-      status: 'Active',
-      createdBy: adminUserId
-    }, { transaction });
-
-    // Associate accessories and consumables with tender
-    await tender.addAccessoryItems(accessories, { transaction });
-    await tender.addConsumableItems(consumables, { transaction });
-
-    return {
-      machines,
-      accessories,
-      consumables,
-      tender,
-      loa
-    };
-  }
-
-  async getDatabaseStats(req, res, next) {
-    try {
-      const [
-        userCount,
-        tenderCount,
-        consigneeCount,
-        accessoryCount,
-        consumableCount,
-        auditLogCount
-      ] = await Promise.all([
-        User.count(),
-        Tender.count(),
-        Consignee.count(),
-        Accessory.count(),
-        Consumable.count(),
-        AuditLog.count()
-      ]);
-
-      const recentActivity = await AuditLog.findAll({
-        attributes: ['action', 'entityType', 'createdAt'],
-        include: [{
-          model: User,
-          attributes: ['username']
-        }],
-        order: [['createdAt', 'DESC']],
-        limit: 10
-      });
-
-      res.json({
-        counts: {
-          users: userCount,
-          tenders: tenderCount,
-          consignees: consigneeCount,
-          accessories: accessoryCount,
-          consumables: consumableCount,
-          auditLogs: auditLogCount
+        tenderId: tenders[0].id,
+        srNo: 'SR002',
+        districtName: 'South District',
+        blockName: 'Block B',
+        facilityName: 'Rural Health Center',
+        consignmentStatus: 'Dispatched',
+        accessoriesPending: {
+          status: true,
+          count: 2,
+          items: ['Cable', 'Battery']
         },
-        recentActivity
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-}
+        serialNumber: 'XR2024001'
+      }
+    ], { transaction });
 
-export default new DatabaseController();
+    await transaction.commit();
+
+    res.json({
+      message: 'Database initialized successfully',
+      users: users.map(u => ({ username: u.username, role: u.role })),
+      tenders: tenders.map(t => ({ tenderNumber: t.tenderNumber, status: t.status })),
+      consignees: consignees.map(c => ({ srNo: c.srNo, district: c.districtName }))
+    });
+  } catch (error) {
+    await transaction.rollback();
+    logger.error('Database initialization failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

@@ -7,7 +7,7 @@ export default (sequelize) => {
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true
     },
-    purchaseOrderId: {
+    tenderId: {
       type: DataTypes.UUID,
       allowNull: false
     },
@@ -27,31 +27,6 @@ export default (sequelize) => {
       type: DataTypes.STRING,
       allowNull: false
     },
-    contactPersonName: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    contactPersonEmail: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      validate: {
-        isEmail: true
-      }
-    },
-    contactPersonMobile: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      validate: {
-        is: /^[0-9]{10}$/
-      }
-    },
-    machineCount: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      validate: {
-        min: 1
-      }
-    },
     consignmentStatus: {
       type: DataTypes.ENUM(
         'Processing',
@@ -62,6 +37,17 @@ export default (sequelize) => {
         'Bill Submitted'
       ),
       defaultValue: 'Processing'
+    },
+    accessoriesPending: {
+      type: DataTypes.JSONB,
+      defaultValue: {
+        status: false,
+        count: 0,
+        items: []
+      }
+    },
+    serialNumber: {
+      type: DataTypes.STRING
     }
   }, {
     tableName: 'consignees',

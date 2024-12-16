@@ -1,44 +1,40 @@
 import express from 'express';
 import multer from 'multer';
-import equipmentInstallationController from '../controllers/equipmentInstallationController.js';
+import {
+  createInstallationRequest,
+  downloadTemplate,
+  getInstallationRequests,
+  uploadConsigneeCSV
+} from '../controllers/equipmentInstallationController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
 
-router.use(authenticate);
+// Configure multer for handling multipart/form-data
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+    files: 3 // Allow up to 3 files
+  }
+});
 
-// Installation requests
-router.post(
-  '/',
-  authorize('admin', 'installer'),
-  equipmentInstallationController.createInstallationRequest
+// Configure the fields for document upload
+const documentUpload = upload.fields([
+  { name: 'tenderDoc', maxCount: 1 },
+  { name: 'loaDoc', maxCount: 1 },
+  { name: 'poDoc', maxCount: 1 },
+  { name: 'data', maxCount: 1 } // Add this to handle the data field
+]);
+
+router.post('/',
+  authenticate,
+  authorize('admin'),
+  documentUpload,
+  createInstallationRequest
 );
-
-router.get(
-  '/',
-  authorize('admin', 'installer', 'logistics_manager'),
-  equipmentInstallationController.getInstallationRequests
-);
-
-router.patch(
-  '/:id/status',
-  authorize('admin', 'installer'),
-  equipmentInstallationController.updateInstallationStatus
-);
-
-// CSV operations
-router.post(
-  '/:id/upload-csv',
-  authorize('admin', 'installer'),
-  upload.single('file'),
-  equipmentInstallationController.processCSVUpload
-);
-
-router.get(
-  '/template',
-  authorize('admin', 'installer'),
-  equipmentInstallationController.downloadTemplate
-);
+router.get('/', authenticate, authorize('admin', 'logistics', 'installation'), getInstallationRequests);
+router.post('/upload-csv', authenticate, authorize('admin'), upload.single('file'), uploadConsigneeCSV);
+router.get('/template', authenticate, authorize('admin'), downloadTemplate);
 
 export default router;
